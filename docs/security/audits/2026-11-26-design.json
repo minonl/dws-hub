@@ -1,0 +1,19 @@
+{
+  "scope": "commit:88f99ec",
+  "signed_by": "非作者（独立 agent 角色）",
+  "date": "2026-11-26",
+  "post_review_delta": "相比审查基线仅：SKILL 的 ding sms 示例一行、SKILL 补 send chat 一行、本记录与 TEMPLATE（不含代码逻辑）",
+  "history_clean": true,
+  "role": "design",
+  "verdict": "pass",
+  "checked": [
+    "--help / README / SKILL 命令集一致",
+    "退出码三处一致",
+    "安全默认五处一致",
+    "help 短路（listen --help 不启动）",
+    "exit 4 实测可达",
+    "ding sms 收件人示例已修正"
+  ],
+  "notes": "P3：SKILL 已补 send chat 示例；TEMPLATE 已改 role 字段",
+  "findings": []
+}

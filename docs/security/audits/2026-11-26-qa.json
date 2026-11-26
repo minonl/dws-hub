@@ -1,0 +1,21 @@
+{
+  "scope": "commit:88f99ec",
+  "signed_by": "非作者（独立 agent 角色）",
+  "date": "2026-11-26",
+  "post_review_delta": "相比审查基线仅：SKILL 的 ding sms 示例一行、SKILL 补 send chat 一行、本记录与 TEMPLATE（不含代码逻辑）",
+  "history_clean": true,
+  "role": "qa",
+  "verdict": "pass",
+  "checked": [
+    "bun test 286 pass / 0 fail",
+    "check-generic 0 命中",
+    "npm pack 38 文件，无测试/无 docs/security",
+    "临时目录安装冒烟",
+    "dry-run 全路径 0 次 dws 调用",
+    "listen --max-ticks 1 有界",
+    "topic 空库提示",
+    "edit 未知 flag exit 2",
+    "follow status today_skipped"
+  ],
+  "findings": []
+}

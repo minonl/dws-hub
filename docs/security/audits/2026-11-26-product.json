@@ -1,0 +1,19 @@
+{
+  "scope": "commit:88f99ec",
+  "signed_by": "非作者（独立 agent 角色）",
+  "date": "2026-11-26",
+  "post_review_delta": "相比审查基线仅：SKILL 的 ding sms 示例一行、SKILL 补 send chat 一行、本记录与 TEMPLATE（不含代码逻辑）",
+  "history_clean": true,
+  "role": "product",
+  "verdict": "pass",
+  "checked": [
+    "README/SKILL 与实现逐条一致",
+    "notify 三档阶梯一致",
+    "分命令 dry-run 语义一致",
+    "命令面均有实现",
+    "退出码 0-5 一致",
+    "配置默认值一致",
+    "包内无 docs/security"
+  ],
+  "findings": []
+}

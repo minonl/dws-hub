@@ -1,0 +1,10 @@
+{
+  "role": "qa|legal|product|design|security",
+  "verdict": "unknown",
+  "scope": "commit:<sha>",
+  "history_clean": null,
+  "findings": [],
+  "signed_by": "",
+  "date": "YYYY-MM-DD",
+  "notes": "verdict 只能填 pass / blocked / unknown；unknown 不得视为通过。findings 不得包含 secret 原文。"
+}

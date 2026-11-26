@@ -1,0 +1,23 @@
+{
+  "scope": "commit:88f99ec",
+  "signed_by": "非作者（独立 agent 角色）",
+  "date": "2026-11-26",
+  "post_review_delta": "相比审查基线仅：SKILL 的 ding sms 示例一行、SKILL 补 send chat 一行、本记录与 TEMPLATE（不含代码逻辑）",
+  "history_clean": true,
+  "role": "legal",
+  "verdict": "pass",
+  "checked": [
+    "MIT，版权主体与署名一致",
+    "仓库内无来源/职务声明（按项目口径）",
+    "0 第三方运行时依赖",
+    "无第三方专有代码",
+    "not-affiliated 声明齐备",
+    "夹具姓名为合成占位、无真实个人信息",
+    "单 commit + noreply + fsck unreachable=0",
+    "包内无 docs/security 与测试"
+  ],
+  "unknown": [
+    "商标注册库离线不可核实"
+  ],
+  "findings": []
+}
