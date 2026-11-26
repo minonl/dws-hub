@@ -14,6 +14,19 @@ import { fileURLToPath } from 'node:url';
 import { dataRoot } from '../config.mjs';
 
 export const LABEL = 'local.dws-hub';
+
+/** 服务里需要生效的 DWS_HUB_* 环境变量（安装时从当前 shell 透传，避免服务起来读不到库/订阅）。 */
+export function serviceEnv(root, env = process.env) {
+  const out = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (!k.startsWith('DWS_HUB_')) continue;
+    if (v === undefined || v === null || v === '') continue;
+    out[k] = String(v);
+  }
+  out.DWS_HUB_HOME = root;
+  out.DWS_HUB_ENABLE = '1';
+  return out;
+}
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const RUN_ENTRY = join(HERE, 'run.mjs');
 
@@ -21,8 +34,9 @@ const isMac = platform() === 'darwin';
 const launchAgentPath = () => join(homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`);
 const systemdUnitPath = () => join(homedir(), '.config', 'systemd', 'user', 'dws-hub.service');
 
-export function plist({ bun, entry, root }) {
+export function plist({ bun, entry, root, env = process.env }) {
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const vars = serviceEnv(root, env);
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -35,10 +49,9 @@ export function plist({ bun, entry, root }) {
   </array>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>DWS_HUB_HOME</key><string>${esc(root)}</string>
-    <key>DWS_HUB_ENABLE</key><string>1</string>
-    <key>DWS_HUB_INTERVAL</key><string>${esc(process.env.DWS_HUB_INTERVAL || '60')}</string>
-    <key>DWS_HUB_STREAM_SEC</key><string>${esc(process.env.DWS_HUB_STREAM_SEC || '1500')}</string>
+${Object.entries({ DWS_HUB_INTERVAL: '60', DWS_HUB_STREAM_SEC: '1500', ...vars })
+  .map(([k, v]) => `    <key>${esc(k)}</key><string>${esc(v)}</string>`)
+  .join('\n')}
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -50,7 +63,7 @@ export function plist({ bun, entry, root }) {
 `;
 }
 
-export function systemdUnit({ bun, entry, root }) {
+export function systemdUnit({ bun, entry, root, env = process.env }) {
   return `[Unit]
 Description=dws-hub (DingTalk workspace CLI capability layer)
 After=network-online.target
@@ -58,10 +71,9 @@ After=network-online.target
 [Service]
 Type=simple
 ExecStart=${bun} ${entry}
-Environment=DWS_HUB_HOME=${root}
-Environment=DWS_HUB_ENABLE=1
-Environment=DWS_HUB_INTERVAL=${process.env.DWS_HUB_INTERVAL || '60'}
-Environment=DWS_HUB_STREAM_SEC=${process.env.DWS_HUB_STREAM_SEC || '1500'}
+${Object.entries({ DWS_HUB_INTERVAL: '60', DWS_HUB_STREAM_SEC: '1500', ...serviceEnv(root, env) })
+  .map(([k, v]) => `Environment=${k}=${v}`)
+  .join('\n')}
 Restart=always
 RestartSec=30
 
@@ -86,7 +98,7 @@ function macLoaded() {
 export function install() {
   const root = dataRoot();
   mkdirSync(join(root, 'logs'), { recursive: true });
-  const args = { bun: process.execPath, entry: RUN_ENTRY, root };
+  const args = { bun: process.execPath, entry: RUN_ENTRY, root, env: process.env };
 
   if (isMac) {
     const file = launchAgentPath();

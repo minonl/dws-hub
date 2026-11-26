@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## [0.1.3] — 2026-11-26
+
+### Fixed
+
+- `service install` now passes through all `DWS_HUB_*` environment variables (database, follow
+  registry, inbox command, self identity) into the generated launchd plist / systemd unit.
+  Previously only home/enable/interval/stream were written, so a supervised install could not see
+  an existing database or delivery command.
+
 ## [0.1.2] — 2026-11-26
 
 ### Fixed
