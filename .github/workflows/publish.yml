@@ -1,0 +1,108 @@
+name: publish
+
+# npm Trusted Publishing：OIDC 换短时凭据，仓库里不放 token。
+# 前置（npmjs.com → dws-hub → Settings → Trusted Publisher）：
+#   Publisher: GitHub Actions
+#   Organization or user: minonl
+#   Repository: dws-hub
+#   Workflow filename: publish.yml
+#   Environment: (留空)
+#   Allowed actions: npm publish
+# 注意：provenance 要求仓库公开；私有仓发版会失败（或需 provenance=false）。
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # OIDC：npm 用它签发短时凭据
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # registry-url 必须保留（否则 npm 认为没有 registry，直接 ENEEDAUTH）；
+      # 但 setup-node 会写 _authToken=${NODE_AUTH_TOKEN} 占位，npm 看到「有 auth」就不走 OIDC。
+      # 所以下一步删掉该行（npm/documentation#1960 的 workaround）。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: 去掉占位 token，让 npm 走 OIDC
+        run: |
+          npmrc="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          sed -i '/_authToken/d' "$npmrc" || true
+          echo "--- npmrc (values hidden) ---"
+          sed -E 's/(_auth[^=]*=).*/\1***/' "$npmrc" || true
+
+      - name: 确保 npm >= 11.5.1（OIDC 最低要求）
+        run: |
+          npm install -g npm@latest >/dev/null 2>&1
+          v=$(npm -v); echo "npm $v"
+          major=${v%%.*}
+          if [ "$major" -lt 11 ]; then echo "::error::npm $v 不支持 trusted publishing"; exit 1; fi
+
+      - name: Unit tests
+        run: bun test
+
+      - name: Generic-only gate
+        env:
+          DWS_HUB_DENYLIST: ${{ secrets.DWS_HUB_DENYLIST }}
+        run: |
+          if [ -z "${DWS_HUB_DENYLIST:-}" ]; then
+            echo "::warning::DWS_HUB_DENYLIST 未配置：本次跑结构规则 + 示例占位 denylist（必要非充分）"
+          fi
+          bun scripts/check-generic.mjs
+
+      - name: 包内容断言
+        run: |
+          npm pack --dry-run --json > /tmp/pack.json
+          node -e '
+            const j = require("/tmp/pack.json");
+            const pkg = Array.isArray(j) ? j[0] : j[Object.keys(j)[0]];
+            const files = (pkg && pkg.files ? pkg.files : []).map((f) => f.path);
+            const need = ["bin/dws-hub.mjs", "src/cli.mjs", "skills/dws-hub/SKILL.md", "docs/design.md", "README.md", "LICENSE"];
+            const missing = need.filter((n) => !files.includes(n));
+            const bad = files.filter((f) => f === "scripts/denylist.txt" || f.startsWith("docs/security/") || f.endsWith(".test.mjs"));
+            if (missing.length) { console.error("tarball missing:", missing.join(", ")); process.exit(1); }
+            if (bad.length) { console.error("tarball contains forbidden:", bad.join(", ")); process.exit(1); }
+            console.log("tarball ok:", files.length, "files");
+          '
+
+      - name: OIDC preflight（诊断用，不打印 token）
+        run: |
+          set -u
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+            echo "::error::缺少 id-token 环境变量（检查 permissions: id-token: write）"
+            exit 1
+          fi
+          echo "id-token env: present"
+
+      - name: 版本 → dist-tag（预发布走 next，正式走 latest）
+        id: tag
+        run: |
+          V=$(node -p "require('./package.json').version")
+          echo "version=$V"
+          case "$V" in
+            *-*) echo "tag=next" >> "$GITHUB_OUTPUT" ;;
+            *)   echo "tag=latest" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: publish (trusted; provenance 仅公开仓可用)
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          if [ "${{ github.event.repository.private }}" = "true" ]; then
+            echo "private repo → 不发 provenance（npm 已知限制）；dist-tag=$TAG"
+            npm publish --access public --tag "$TAG" --provenance=false
+          else
+            npm publish --access public --tag "$TAG" --provenance
+          fi
