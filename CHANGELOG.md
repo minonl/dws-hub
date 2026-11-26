@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here.
 
+## [0.1.1] — 2026-11-26
+
+### Changed
+
+- First release published from CI via **npm Trusted Publishing (OIDC)** with provenance.
+
 ## [0.1.0] — 2026-11-26
 
 ### Added
