@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here.
 
+## [0.1.2] — 2026-11-26
+
+### Fixed
+
+- Republish to work around a CDN edge issue that cached a pre-replication 404 for the
+  `0.1.1` tarball. Package contents are identical apart from the version.
+
 ## [0.1.1] — 2026-11-26
 
 ### Changed
