@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here.
 
+## [0.1.6] — 2026-11-26
+
+### Fixed
+
+- The generated `session-follow` wrapper now adds common bin directories to `PATH` and falls back to
+  an absolute Bun path. Under launchd/systemd the previous wrapper could not find `bun`, so the
+  consumer exited non-zero and events were never acknowledged.
+
 ## [0.1.5] — 2026-11-26
 
 ### Fixed

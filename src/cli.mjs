@@ -850,13 +850,16 @@ function writeFollowWrapper() {
   const binDir = join(dataRoot(), 'bin');
   mkdirSync(binDir, { recursive: true });
   const file = join(binDir, 'dws-hub-follow');
-  const fallbackBin = process.argv[1] || 'dws-hub';
+  const fallbackEntry = process.argv[1] || 'dws-hub';
+  const bun = process.execPath;
   const script = `#!/bin/bash
 # 稳定入口（勿手改）：dws-hub consumer session-follow
 set -u
+# launchd/systemd 的 PATH 极简：补常用 bin 目录（dws 的 node/dia 通常也在这些位置）
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$HOME/.local/share/fnm/aliases/default/bin:$PATH"
 BIN="$(command -v dws-hub 2>/dev/null || true)"
-[ -n "$BIN" ] || BIN=${JSON.stringify(fallbackBin)}
-exec "$BIN" consume session-follow
+if [ -n "$BIN" ]; then exec "$BIN" consume session-follow; fi
+exec ${JSON.stringify(bun)} ${JSON.stringify(fallbackEntry)} consume session-follow
 `;
   writeFileSync(file, script);
   chmodSync(file, 0o755);
