@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## [0.1.4] — 2026-11-26
+
+### Fixed
+
+- The supervised runner now resolves `dws` to an absolute path (explicit `DWS_BIN` → login shell
+  lookup → common install locations) and prepends its directory to `PATH`. launchd/systemd start with
+  a minimal `PATH`, so the service previously failed with `Executable not found in $PATH: "dws"`.
+- `service install` records the resolved `DWS_BIN` in the generated unit/plist.
+
 ## [0.1.3] — 2026-11-26
 
 ### Fixed

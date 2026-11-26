@@ -18,6 +18,17 @@ export const LABEL = 'local.dws-hub';
 /** 服务里需要生效的 DWS_HUB_* 环境变量（安装时从当前 shell 透传，避免服务起来读不到库/订阅）。 */
 export function serviceEnv(root, env = process.env) {
   const out = {};
+  // launchd/systemd 的 PATH 极简：把 dws 的绝对路径一起写进去，否则服务里找不到它
+  if (!env.DWS_BIN) {
+    try {
+      const found = execFileSync('/bin/sh', ['-lc', 'command -v dws'], { encoding: 'utf8', timeout: 5000 })
+        .trim()
+        .split('\n')[0];
+      if (found) out.DWS_BIN = found;
+    } catch {
+      /* 解析失败就交给运行时再找 */
+    }
+  }
   for (const [k, v] of Object.entries(env)) {
     if (!k.startsWith('DWS_HUB_')) continue;
     if (v === undefined || v === null || v === '') continue;

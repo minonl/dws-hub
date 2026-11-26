@@ -8,8 +8,9 @@
  * - **单实例**：`mkdir` 原子锁（`<root>/run/dws-hub.lock`），双实例会互相抢订阅。
  * - **启动自检**：`dws` 不可执行就大声退出，绝不静默当成「0 条消息」（历史事故）。
  */
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -69,18 +70,39 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
 }
 
 // ── dws 自检 ────────────────────────────────────────────────────────────────
-const dwsBin = process.env.DWS_BIN || 'dws';
-const probe = spawn(dwsBin, ['--version'], { stdio: ['ignore', 'pipe', 'pipe'] });
-let probeOut = '';
-probe.stdout.on('data', (c) => (probeOut += c));
-probe.on('close', (code) => {
-  if (code !== 0) {
-    log(`✗ dws 不可执行（${dwsBin}）——常见原因：PATH 缺 node（dws 是 Node 脚本）；先修 PATH 再启动`);
-    process.exit(3);
+// launchd / systemd 的 PATH 极简（/usr/bin:/bin），既找不到 dws，也找不到 dws 需要的 node。
+// 先按「显式 → 登录 shell 解析 → 常见安装位置」找绝对路径，再把它的目录塞进 PATH。
+function resolveDws() {
+  const cands = [process.env.DWS_BIN];
+  try {
+    const viaShell = execFileSync('/bin/sh', ['-lc', 'command -v dws'], { encoding: 'utf8', timeout: 5000 })
+      .trim()
+      .split('\n')[0];
+    if (viaShell) cands.push(viaShell);
+  } catch {
+    /* 登录 shell 不可用就继续用候选列表 */
   }
-  log(`dws 自检通过：${probeOut.trim().split('\n')[0]}`);
-  run();
-});
+  cands.push('/opt/homebrew/bin/dws', '/usr/local/bin/dws', join(homedir(), '.local/bin/dws'));
+  for (const c of cands.filter(Boolean)) {
+    try {
+      execFileSync(c, ['--version'], { stdio: 'ignore', timeout: 5000 });
+      return c;
+    } catch {
+      /* try next */
+    }
+  }
+  return null;
+}
+
+const dwsBin = resolveDws();
+if (!dwsBin) {
+  log('✗ 找不到可执行的 dws（设置 DWS_BIN 或把它装到 PATH）——注意 dws 是 Node 脚本，还需要 node');
+  process.exit(3);
+}
+process.env.DWS_BIN = dwsBin;
+process.env.PATH = `${dirname(dwsBin)}:${process.env.PATH || '/usr/bin:/bin'}`;
+log(`dws 自检通过：${dwsBin}`);
+run();
 
 function run() {
   const args = [
