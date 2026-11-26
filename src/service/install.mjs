@@ -20,8 +20,13 @@ export function serviceEnv(root, env = process.env) {
   const out = {};
   // launchd/systemd 的 PATH 极简：把 dws 的绝对路径一起写进去，否则服务里找不到它
   if (!env.DWS_BIN) {
+    // 安装时是从用户 shell 里跑的，PATH 完整：用非登录 shell 取实际路径即可
     try {
-      const found = execFileSync('/bin/sh', ['-lc', 'command -v dws'], { encoding: 'utf8', timeout: 5000 })
+      const found = execFileSync('/bin/sh', ['-c', 'command -v dws'], {
+        encoding: 'utf8',
+        timeout: 5000,
+        env,
+      })
         .trim()
         .split('\n')[0];
       if (found) out.DWS_BIN = found;

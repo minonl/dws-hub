@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here.
 
+## [0.1.5] — 2026-11-26
+
+### Fixed
+
+- `direct:` scopes whose id is an openDingTalkId now use `--open-dingtalk-id` (poll and event stream).
+  Passing an open id to `--user` made `dws` fail with `peerUid is required`, so direct conversations
+  never polled.
+
 ## [0.1.4] — 2026-11-26
 
 ### Fixed

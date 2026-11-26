@@ -20,12 +20,20 @@ import { atMe as queryAtMe } from './query.mjs';
 export const SELF_SCOPE = 'self';
 
 /** scope（渠道无关）→ dws 目标参数。 */
+/** 看起来像 openDingTalkId（字母开头、>=16 位、非纯数字）——dws 的 `--user` 只收 userId。 */
+export function looksLikeOpenId(id) {
+  const s = String(id || '');
+  return /^[A-Za-z]/.test(s) && s.length >= 16 && !/^\d+$/.test(s);
+}
+
 export function scopeSpec(scope) {
   if (scope === SELF_SCOPE) return { kind: 'self' };
   const [kind, ...rest] = String(scope).split(':');
   const id = rest.join(':');
   if (kind === 'group') return { kind: 'group', id, args: ['--group', id] };
-  if (kind === 'direct') return { kind: 'direct', id, args: ['--user', id] };
+  if (kind === 'direct') {
+    return { kind: 'direct', id, args: [looksLikeOpenId(id) ? '--open-dingtalk-id' : '--user', id] };
+  }
   return { kind: 'unknown', id };
 }
 
@@ -538,7 +546,9 @@ export function streamArgsFor(scope, extra = []) {
     const isId = /^cid/i.test(String(spec.id));
     return ['event', '+listen-im', '--kind', 'group', isId ? '--chat-id' : '--chat-query', spec.id, ...extra];
   }
-  if (spec.kind === 'direct') return ['event', '+listen-im', '--kind', 'sender', '--user', spec.id, ...extra];
+  if (spec.kind === 'direct') {
+    return ['event', '+listen-im', '--kind', 'sender', looksLikeOpenId(spec.id) ? '--open-dingtalk-id' : '--user', spec.id, ...extra];
+  }
   return null;
 }
 

@@ -10,6 +10,15 @@ describe('listen / scope 与 stream 参数', () => {
     expect(scopeSpec('direct:uid_demo_0001')).toEqual({ kind: 'direct', id: 'uid_demo_0001', args: ['--user', 'uid_demo_0001'] });
   });
 
+  test('direct 的 openId 形态走 --open-dingtalk-id，userId 走 --user', () => {
+    expect(scopeSpec('direct:u123456').args).toEqual(['--user', 'u123456']);
+    expect(scopeSpec('direct:ExampleOpenId0123456789ABCDEF').args).toEqual([
+      '--open-dingtalk-id',
+      'ExampleOpenId0123456789ABCDEF',
+    ]);
+    expect(streamArgsFor('direct:ExampleOpenId0123456789ABCDEF')).toContain('--open-dingtalk-id');
+  });
+
   test('self 无事件通道（自聊消息被 self-loop 过滤）→ 只能轮询', () => {
     expect(streamArgsFor('self')).toBeNull();
     // ⚠️ 稳定 ID（cid…）必须走 `--chat-id`；只有**群名**才用 `--chat-query`（否则流起来就退，2026-10-16 实测）

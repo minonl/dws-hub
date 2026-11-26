@@ -9,7 +9,7 @@
  * - **启动自检**：`dws` 不可执行就大声退出，绝不静默当成「0 条消息」（历史事故）。
  */
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -74,18 +74,44 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
 // 先按「显式 → 登录 shell 解析 → 常见安装位置」找绝对路径，再把它的目录塞进 PATH。
 function resolveDws() {
   const cands = [process.env.DWS_BIN];
+  // 非登录 shell 继承的是当前 PATH：手动跑时有效；服务里 PATH 极简时会失败，继续走候选
   try {
-    const viaShell = execFileSync('/bin/sh', ['-lc', 'command -v dws'], { encoding: 'utf8', timeout: 5000 })
+    const viaShell = execFileSync('/bin/sh', ['-c', 'command -v dws'], { encoding: 'utf8', timeout: 5000 })
       .trim()
       .split('\n')[0];
     if (viaShell) cands.push(viaShell);
   } catch {
-    /* 登录 shell 不可用就继续用候选列表 */
+    /* ignore */
   }
-  cands.push('/opt/homebrew/bin/dws', '/usr/local/bin/dws', join(homedir(), '.local/bin/dws'));
-  for (const c of cands.filter(Boolean)) {
+  // 常见 Node 版本管理器路径（dws 是 Node 脚本，装在 node 的 bin 下）
+  const globs = [
+    join(homedir(), '.local/share/fnm/aliases/default/bin/dws'),
+    join(homedir(), '.local/bin/dws'),
+    '/opt/homebrew/bin/dws',
+    '/usr/local/bin/dws',
+  ];
+  for (const dir of [join(homedir(), '.local/state/fnm_multishells'), join(homedir(), '.nvm/versions/node')]) {
     try {
-      execFileSync(c, ['--version'], { stdio: 'ignore', timeout: 5000 });
+      const entries = readdirSync(dir);
+      for (const e of entries) {
+        globs.push(
+          dir.includes('fnm_multishells') ? join(dir, e, 'bin/dws') : join(dir, e, 'bin/dws'),
+        );
+      }
+    } catch {
+      /* 目录不存在 */
+    }
+  }
+  cands.push(...globs);
+  for (const c of cands.filter(Boolean)) {
+    // dws 是 Node 脚本：node 可能和它在同一个 bin 目录，测试时先把该目录塞进 PATH
+    const dir = dirname(c);
+    try {
+      execFileSync(c, ['--version'], {
+        stdio: 'ignore',
+        timeout: 5000,
+        env: { ...process.env, PATH: `${dir}:${process.env.PATH || '/usr/bin:/bin'}` },
+      });
       return c;
     } catch {
       /* try next */

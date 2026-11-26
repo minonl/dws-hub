@@ -1,6 +1,6 @@
 {
   "name": "dws-hub",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Reliable capability layer for the DingTalk workspace CLI (dws): idempotent send, @ rendering, read-back verification, listening, dispatch, rate limiting, degradation ladder.",
   "type": "module",
   "bin": {
