@@ -1,0 +1,13 @@
+# 通用性 denylist（示例）
+#
+# 一条一行，按 JS 正则解释（忽略大小写）。命中的文件行会让 check-generic 失败。
+# 用法：
+#   本地 → 复制本文件为 scripts/denylist.txt（已被 .gitignore 忽略），填入你自己的禁用词
+#   CI   → 环境变量 DWS_HUB_DENYLIST（多行，GitHub secret 注入），优先于本文件
+#
+# 为什么放在数据里而不是代码里：仓库是公开的，规则里不应该出现真实公司名/内网域名/人名。
+
+example-company
+example-org
+git\.example\.internal
+~\/\.example-agent

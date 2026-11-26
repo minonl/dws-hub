@@ -1,0 +1,46 @@
+{
+  "name": "dws-hub",
+  "version": "0.1.0",
+  "description": "Reliable capability layer for the DingTalk workspace CLI (dws): idempotent send, @ rendering, read-back verification, listening, dispatch, rate limiting, degradation ladder.",
+  "type": "module",
+  "bin": {
+    "dws-hub": "bin/dws-hub.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "!src/**/*.test.mjs",
+    "skills",
+    "docs",
+    "!docs/security",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "SECURITY.md"
+  ],
+  "engines": {
+    "bun": ">=1.1"
+  },
+  "scripts": {
+    "test": "bun test",
+    "check:generic": "bun scripts/check-generic.mjs",
+    "prepack": "bun scripts/check-generic.mjs 1>&2"
+  },
+  "keywords": [
+    "dingtalk",
+    "dws",
+    "cli",
+    "agent",
+    "notification",
+    "idempotency"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/minonl/dws-hub.git"
+  },
+  "bugs": {
+    "url": "https://github.com/minonl/dws-hub/issues"
+  },
+  "homepage": "https://github.com/minonl/dws-hub#readme"
+}

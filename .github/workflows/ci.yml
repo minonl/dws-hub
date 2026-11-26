@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Unit tests
+        run: bun test
+
+      - name: Generic-only gate
+        env:
+          # 真实禁用词由仓库 secret 注入，公开仓不落真名；未配置时只跑结构规则
+          DWS_HUB_DENYLIST: ${{ secrets.DWS_HUB_DENYLIST }}
+        run: |
+          if [ -z "${DWS_HUB_DENYLIST:-}" ]; then
+            echo "::warning::DWS_HUB_DENYLIST 未配置：本次跑结构规则 + 示例占位 denylist（必要非充分）"
+          fi
+          bun scripts/check-generic.mjs
+
+      - name: Package contents
+        run: npm pack --dry-run
