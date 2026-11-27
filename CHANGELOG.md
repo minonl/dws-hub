@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## [0.1.8] — 2026-11-27
+
+### Fixed
+
+- `doctor` now treats the installed service unit as the source of truth: resource checks
+  (data root / db / follows / inbox) use the unit's environment when present, instead of the
+  caller's shell. `root-consistency` only fails when the caller explicitly passes a conflicting
+  `DWS_HUB_HOME`. This removes the "green on a configuration the service never uses" false pass.
+
 ## [0.1.7] — 2026-11-27
 
 ### Fixed

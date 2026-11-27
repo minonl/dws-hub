@@ -80,6 +80,9 @@ function probe(bin, args) {
 
 export function doctor({ env = process.env } = {}) {
   const checks = [];
+  // 服务单元是 SSOT：单元存在时，资源类检查按单元 env 合并（否则会检查"另一套配置"→ 假绿）
+  const unitEarly = unitEnv();
+  const eff = unitEarly ? { ...env, ...unitEarly.env } : env;
   const add = (id, ok, detail, fix) => checks.push({ id, ok, detail, ...(ok ? {} : { fix }) });
 
   // 1) bun
@@ -100,31 +103,33 @@ export function doctor({ env = process.env } = {}) {
   }
 
   // 4) 数据根
-  const root = dataRoot(env);
+  const root = dataRoot(eff);
   const tmpPrefixes = ['/tmp', '/private/tmp', '/var/folders', '/private/var/folders', tmpdir()].filter(Boolean);
   const ephemeral = tmpPrefixes.some((p) => root.startsWith(p.replace(/\/$/, '')));
   add('data-root', !ephemeral, root, '把 DWS_HUB_HOME 指到持久目录（系统临时目录重启即丢）');
 
   // 5) 库（不存在是正常状态：首次运行会创建）
-  const db = dbPath(env);
+  const db = dbPath(eff);
   add('db', true, existsSync(db) ? `${db}（${Math.round(statSync(db).size / 1024)} KB）` : `${db} 尚未创建（首次运行会创建）`);
 
   // 6) 投递命令
-  const cmd = String(env[ENV.inboxCmd] || '').trim();
+  const cmd = String(eff[ENV.inboxCmd] || '').trim();
   add('inbox', Boolean(cmd), cmd ? 'DWS_HUB_INBOX_CMD 已配置' : '未配置：消息只落 logs/inbox-skipped-*.jsonl', `设置 ${ENV.inboxCmd}（模板变量见 README）`);
 
   // 7) 订阅注册表
-  const follows = followsPath(env);
+  const follows = followsPath(eff);
   add('follows', true, existsSync(follows) ? `${follows}` : `${follows} 不存在（无订阅）`);
 
   // 7.5) 服务单元的环境 vs 当前根（防「doctor 检查的不是活服务那套」的假绿）
   const unit = unitEnv();
   if (unit) {
     const unitRoot = unit.env.DWS_HUB_HOME;
+    const explicitHome = env[ENV.home];
+    const conflict = Boolean(explicitHome && unitRoot && explicitHome !== unitRoot);
     add(
       'root-consistency',
-      !unitRoot || unitRoot === root,
-      unitRoot ? `unit=${unitRoot} vs current=${root}` : 'unit 未声明 DWS_HUB_HOME',
+      !conflict,
+      unitRoot ? `unit=${unitRoot}${explicitHome ? ` vs env=${explicitHome}` : '（未显式设置 env，以单元为准）'}` : 'unit 未声明 DWS_HUB_HOME',
       `用同一套 env 重装：DWS_HUB_HOME=${unitRoot} dws-hub service install`,
     );
   }
