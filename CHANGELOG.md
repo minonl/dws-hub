@@ -2,56 +2,30 @@
 
 All notable changes to this project are documented here.
 
-## [0.1.11] — 2026-11-27
+## [0.2.0] — 2026-11-27
+
+**Service reliability.** Consolidates the 0.1.7–0.1.11 patch series (those versions were published
+during the audit and are now superseded).
 
 ### Fixed
 
-- `service install` waits for the old job to actually unload and retries `launchctl bootstrap`.
-  `bootout` is asynchronous: bootstrapping too early intermittently failed with launchd EIO,
-  leaving the service **not loaded** after an otherwise successful install.
-
-## [0.1.10] — 2026-11-27
-
-### Fixed
-
+- **Cross-root single instance**: the lock lives at a fixed `~/.dws-hub/run/dws-hub.lock`
+  (override: `DWS_HUB_LOCK`), independent of `DWS_HUB_HOME`. Two installs with different data roots
+  previously held two different locks and could run side by side.
+- `listen` takes the same lock (the supervised child is exempted via `DWS_HUB_SKIP_LOCK=1`) and exits
+  `3` with the owner pid instead of duplicating subscriptions.
+- **Runtime Bun launcher**: the launchd plist / systemd unit starts `<root>/bin/dws-hub-service`,
+  which resolves `bun` at run time (`DWS_HUB_BUN` → `PATH` → common locations). No versioned Bun
+  path is baked in, so Homebrew/fnm/nvm upgrades cannot break the service.
+- `service install` waits for the old job to unload and retries `launchctl bootstrap` (bootout is
+  asynchronous; a too-early bootstrap intermittently left the service unloaded).
 - `service install` merges the **existing unit environment** as defaults, so re-running it from a
-  shell that only exports some variables no longer drops the rest (inbox command, self identity).
-- `doctor` reports one `bun` check (runtime + PATH resolution) instead of duplicating it.
-
-## [0.1.9] — 2026-11-27
-
-### Changed
-
-- The supervised entry point is now a **stable launcher** (`<root>/bin/dws-hub-service`) that resolves
-  `bun` at run time (`DWS_HUB_BUN` → `PATH` → common locations). The plist/unit no longer embeds a
-  versioned Bun path, so Homebrew/fnm/nvm upgrades cannot break the service. `doctor` reports `bun`,
-  `launcher` and `running-version`.
-- Daily log files (`logs/service-YYYY-MM-DD.log`) with a 14-day retention (`DWS_HUB_LOG_KEEP_DAYS`).
-- Linux install reports whether `loginctl` linger is enabled (otherwise the service stops on logout).
-- `service uninstall` reports `possible_resurrectors` (other dws-hub registrations still present).
-
-## [0.1.8] — 2026-11-27
-
-### Fixed
-
-- `doctor` now treats the installed service unit as the source of truth: resource checks
-  (data root / db / follows / inbox) use the unit's environment when present, instead of the
-  caller's shell. `root-consistency` only fails when the caller explicitly passes a conflicting
-  `DWS_HUB_HOME`. This removes the "green on a configuration the service never uses" false pass.
-
-## [0.1.7] — 2026-11-27
-
-### Fixed
-
-- **Cross-root single instance**: the lock now lives at a fixed `~/.dws-hub/run/dws-hub.lock`
-  (overridable via `DWS_HUB_LOCK`) instead of under `DWS_HUB_HOME`. Two installs with different data
-  roots previously held two different locks and could run side by side.
-- `listen` now takes the same lock (the supervised child is exempted via `DWS_HUB_SKIP_LOCK=1`) and
-  exits `3` with the owner pid instead of silently duplicating subscriptions.
-- `service install` resolves `bun` from `PATH` (not the versioned Homebrew Cellar path) and marks the
-  generated plist/unit with `X-DwsHub-Owned`.
-- `doctor` gained two checks: `root-consistency` (unit `DWS_HUB_HOME` vs current process) and
-  `duplicate-registration` (any other launchd label / systemd unit that looks like dws-hub).
+  shell that exports only some variables no longer drops the rest.
+- `doctor` gained: `bun`, `launcher`, `running-version` (lock meta vs package), `root-consistency`
+  (unit vs caller), `duplicate-registration` (any other dws-hub launchd label / systemd unit).
+  Resource checks now use the **service unit's** environment as the source of truth.
+- Daily log files (`logs/service-YYYY-MM-DD.log`, 14-day retention), Linux linger check on install,
+  and `service uninstall` reports `possible_resurrectors`.
 
 ## [0.1.6] — 2026-11-26
 
