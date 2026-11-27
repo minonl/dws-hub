@@ -58,6 +58,7 @@ export function plist({ bun, entry, root, env = process.env }) {
 <plist version="1.0">
 <dict>
   <key>Label</key><string>${LABEL}</string>
+  <key>X-DwsHub-Owned</key><true/>
   <key>ProgramArguments</key>
   <array>
     <string>${esc(bun)}</string>
@@ -85,6 +86,7 @@ Description=dws-hub (DingTalk workspace CLI capability layer)
 After=network-online.target
 
 [Service]
+X-DwsHub-Owned=1
 Type=simple
 ExecStart=${bun} ${entry}
 ${Object.entries({ DWS_HUB_INTERVAL: '60', DWS_HUB_STREAM_SEC: '1500', ...serviceEnv(root, env) })
@@ -111,10 +113,23 @@ function macLoaded() {
   }
 }
 
+/** 解析 bun：优先 PATH 里的稳定入口，避免把 Homebrew Cellar 版本目录钉进 plist（升级后路径会消失）。 */
+export function resolveBun(env = process.env) {
+  try {
+    const p = execFileSync('/bin/sh', ['-c', 'command -v bun'], { encoding: 'utf8', timeout: 5000, env })
+      .trim()
+      .split('\n')[0];
+    if (p && !/\/Cellar\//.test(p)) return p;
+  } catch {
+    /* fall through */
+  }
+  return process.execPath;
+}
+
 export function install() {
   const root = dataRoot();
   mkdirSync(join(root, 'logs'), { recursive: true });
-  const args = { bun: process.execPath, entry: RUN_ENTRY, root, env: process.env };
+  const args = { bun: resolveBun(process.env), entry: RUN_ENTRY, root, env: process.env };
 
   if (isMac) {
     const file = launchAgentPath();

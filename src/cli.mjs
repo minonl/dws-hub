@@ -1197,6 +1197,21 @@ async function main() {
     }
 
     case 'listen': {
+      // 跨数据根单实例：service 的 listen 子进程由 service 持锁（DWS_HUB_SKIP_LOCK=1）
+      let instLock = null;
+      if (process.env.DWS_HUB_SKIP_LOCK !== '1') {
+        const { acquireLock } = await import('./service/lock.mjs');
+        try {
+          instLock = acquireLock({ role: 'listen' });
+          print({ ok: true, lock: instLock.path });
+        } catch (e) {
+          if (e?.code === 'E_LOCKED') {
+            process.stderr.write(`[dws-hub] ✗ ${e.message}\n`);
+            return 3;
+          }
+          throw e;
+        }
+      }
       const intervalMs = (Number(a.interval) || 60) * 1000;
       const streamSec = Number(a['stream-sec']) || 1500;
       const maxTicks = a['max-ticks'] ? Number(a['max-ticks']) : Infinity;
@@ -1211,6 +1226,7 @@ async function main() {
           process.stdout.write(`[tick ${ticks}] inserted=${r.pull.inserted} ${detail} rx=${(r.reactions || {}).inserted || 0} watch=${(r.watched || {}).insertedEvents?.length || 0}/${(r.watched || {}).watched || 0} anchors=${JSON.stringify((r.anchorHits || []).map((h) => `${h.anchor}/${h.via}`))} acked=${JSON.stringify((r.acked || []).map((x) => x.action || x.skipped))} ing=${JSON.stringify((r.ing || []).map((x) => x.action))} dispatched=${JSON.stringify(r.dispatch)} ladder=${JSON.stringify(r.ladder)}\n`);
         },
       });
+      instLock?.release();
       print(state);
       return 0;
     }

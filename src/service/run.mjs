@@ -15,58 +15,39 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { dataRoot } from '../config.mjs';
+import { acquireLock } from './lock.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI = join(HERE, '..', 'cli.mjs');
 
 const root = dataRoot();
-const lock = join(root, 'run', 'dws-hub.lock');
 const logs = join(root, 'logs');
-mkdirSync(dirname(lock), { recursive: true });
 mkdirSync(logs, { recursive: true });
 
 function log(msg) {
   console.log(`[dws-hub] ${new Date().toISOString()} ${msg}`);
 }
 
-// ── 单实例锁 ────────────────────────────────────────────────────────────────
+// ── 单实例锁（跨数据根，唯一路径见 service/lock.mjs）────────────────────────
+let lock;
 try {
-  mkdirSync(lock);
-  writeFileSync(join(lock, 'pid'), String(process.pid));
-} catch {
-  const owner = Number(readFileSync(join(lock, 'pid'), 'utf8').trim() || 0);
-  const alive = owner > 0 && (() => {
-    try {
-      process.kill(owner, 0);
-      return true;
-    } catch {
-      return false;
-    }
-  })();
-  if (alive) {
-    log(`已有实例在跑（pid=${owner}）→ 退出，避免双实例`);
-    process.exit(0);
+  lock = acquireLock({ role: 'service' });
+} catch (e) {
+  if (e?.code === 'E_LOCKED') {
+    log(`✗ ${e.message}`);
+    process.exit(3);
   }
-  log(`发现陈旧锁（pid=${owner} 已不在）→ 接管`);
-  rmSync(lock, { recursive: true, force: true });
-  mkdirSync(lock);
-  writeFileSync(join(lock, 'pid'), String(process.pid));
+  throw e;
 }
+if (lock.reclaimed) log('接管陈旧锁（上一个实例的 pid 已不在）');
+log(`锁：${lock.path}`);
 
 function cleanup() {
-  try {
-    rmSync(lock, { recursive: true, force: true });
-  } catch {
-    /* 清理失败不阻塞退出 */
-  }
+  try { lock.release(); } catch { /* noop */ }
 }
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
-  process.on(sig, () => {
-    log(`收到 ${sig}，退出`);
-    cleanup();
-    process.exit(0);
-  });
+  process.on(sig, () => { log(`收到 ${sig}，退出`); cleanup(); process.exit(0); });
 }
 
 // ── dws 自检 ────────────────────────────────────────────────────────────────
@@ -138,7 +119,10 @@ function run() {
     '--stream-sec', process.env.DWS_HUB_STREAM_SEC || '1500',
   ];
   log(`启动监听：bun ${args.join(' ')}（数据根 ${root}）`);
-  const child = spawn(process.execPath, args, { stdio: 'inherit' });
+  const child = spawn(process.execPath, args, {
+    stdio: 'inherit',
+    env: { ...process.env, DWS_HUB_SKIP_LOCK: '1' },   // 锁由 service 持有，listen 子进程不再抢
+  });
   child.on('close', (code) => {
     log(`listen 退出 code=${code}`);
     cleanup();

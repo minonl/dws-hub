@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented here.
 
+## [0.1.7] — 2026-11-27
+
+### Fixed
+
+- **Cross-root single instance**: the lock now lives at a fixed `~/.dws-hub/run/dws-hub.lock`
+  (overridable via `DWS_HUB_LOCK`) instead of under `DWS_HUB_HOME`. Two installs with different data
+  roots previously held two different locks and could run side by side.
+- `listen` now takes the same lock (the supervised child is exempted via `DWS_HUB_SKIP_LOCK=1`) and
+  exits `3` with the owner pid instead of silently duplicating subscriptions.
+- `service install` resolves `bun` from `PATH` (not the versioned Homebrew Cellar path) and marks the
+  generated plist/unit with `X-DwsHub-Owned`.
+- `doctor` gained two checks: `root-consistency` (unit `DWS_HUB_HOME` vs current process) and
+  `duplicate-registration` (any other launchd label / systemd unit that looks like dws-hub).
+
 ## [0.1.6] — 2026-11-26
 
 ### Fixed

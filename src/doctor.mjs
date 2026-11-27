@@ -4,11 +4,70 @@
  * 目的：把「看起来在跑其实没投递」「注册路径指向旧安装」这类静默故障提前暴露。
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { dataRoot, dbPath, ENV, followsPath } from './config.mjs';
 import { RUN_ENTRY, status as serviceStatus } from './service/install.mjs';
+
+/** 读「服务单元」里的环境变量（SSOT：服务实际生效的那份，而不是当前 shell）。 */
+export function unitEnv() {
+  if (process.platform === 'darwin') {
+    const file = join(homedir(), 'Library', 'LaunchAgents', 'local.dws-hub.plist');
+    if (!existsSync(file)) return null;
+    try {
+      const j = JSON.parse(execFileSync('plutil', ['-convert', 'json', '-o', '-', file], { encoding: 'utf8' }));
+      return { file, env: j.EnvironmentVariables || {} };
+    } catch {
+      return { file, env: {} };
+    }
+  }
+  const file = join(homedir(), '.config', 'systemd', 'user', 'dws-hub.service');
+  if (!existsSync(file)) return null;
+  const env = {};
+  for (const line of readFileSync(file, 'utf8').split('\n')) {
+    const m = /^Environment=([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line.trim());
+    if (m) env[m[1]] = m[2];
+  }
+  return { file, env };
+}
+
+/** 扫描机器上**所有**看起来在跑 dws-hub 的注册（不只是自己的 label）。 */
+export function findRegistrations() {
+  const out = [];
+  if (process.platform === 'darwin') {
+    try {
+      const list = execFileSync('launchctl', ['list'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      for (const line of list.split('\n')) {
+        const parts = line.split('\t');
+        const label = parts[2] || '';
+        if (!/dws[-_]hub/i.test(label)) continue;
+        let args = [];
+        try {
+          const p = execFileSync('plutil', ['-convert', 'json', '-o', '-', join(homedir(), 'Library', 'LaunchAgents', `${label}.plist`)], { encoding: 'utf8' });
+          args = JSON.parse(p).ProgramArguments || [];
+        } catch {
+          /* plist 可能不在本 HOME（历史/测试残留） */
+        }
+        out.push({ label, pid: parts[0], args: args.join(' ') });
+      }
+    } catch {
+      /* launchctl 不可用 */
+    }
+    return out;
+  }
+  try {
+    const files = execFileSync('systemctl', ['--user', 'list-unit-files', '*dws-hub*', '--no-legend'], { encoding: 'utf8' });
+    for (const line of files.split('\n').filter(Boolean)) {
+      const name = line.split(/\s+/)[0];
+      out.push({ label: name, args: '' });
+    }
+  } catch {
+    /* ignore */
+  }
+  return out;
+}
 
 function probe(bin, args) {
   try {
@@ -57,6 +116,27 @@ export function doctor({ env = process.env } = {}) {
   // 7) 订阅注册表
   const follows = followsPath(env);
   add('follows', true, existsSync(follows) ? `${follows}` : `${follows} 不存在（无订阅）`);
+
+  // 7.5) 服务单元的环境 vs 当前根（防「doctor 检查的不是活服务那套」的假绿）
+  const unit = unitEnv();
+  if (unit) {
+    const unitRoot = unit.env.DWS_HUB_HOME;
+    add(
+      'root-consistency',
+      !unitRoot || unitRoot === root,
+      unitRoot ? `unit=${unitRoot} vs current=${root}` : 'unit 未声明 DWS_HUB_HOME',
+      `用同一套 env 重装：DWS_HUB_HOME=${unitRoot} dws-hub service install`,
+    );
+  }
+
+  // 7.6) 重复注册（不同 label 但都在跑 dws-hub）
+  const regs = findRegistrations();
+  add(
+    'duplicate-registration',
+    regs.length <= 1,
+    regs.length ? regs.map((r) => r.label).join(', ') : '无',
+    '停掉并卸载多余的注册（dws-hub service uninstall / 旧 dia-job 卸载）',
+  );
 
   // 8) 服务
   const svc = serviceStatus();
