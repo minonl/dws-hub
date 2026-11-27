@@ -170,6 +170,41 @@ export function readUnitEnv() {
   }
 }
 
+const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+/** 等 label 真正从 launchd 消失（bootout 是异步的，紧接着 bootstrap 会偶发 EIO）。 */
+function waitUnloaded(domain, label, tries = 20) {
+  for (let i = 0; i < tries; i += 1) {
+    try {
+      sh('launchctl', ['print', `${domain}/${label}`]);
+      sleepSync(100);
+    } catch {
+      return true;
+    }
+  }
+  return false;
+}
+
+function bootstrapRetry(domain, file, label, tries = 5) {
+  let lastErr;
+  for (let i = 0; i < tries; i += 1) {
+    try {
+      sh('launchctl', ['bootstrap', domain, file]);
+      return;
+    } catch (e) {
+      lastErr = e;
+      // 已存在（另一实例刚起来）也算成功
+      try {
+        sh('launchctl', ['print', `${domain}/${label}`]);
+        return;
+      } catch {
+        sleepSync(300);
+      }
+    }
+  }
+  throw lastErr || new Error('bootstrap failed');
+}
+
 export function install() {
   const root = dataRoot();
   mkdirSync(join(root, 'logs'), { recursive: true });
@@ -188,7 +223,8 @@ export function install() {
     } catch {
       /* 未加载是正常情况 */
     }
-    sh('launchctl', ['bootstrap', domain, file]);
+    waitUnloaded(domain, LABEL);
+    bootstrapRetry(domain, file, LABEL);
     sh('launchctl', ['enable', `${domain}/${LABEL}`]);
     sh('launchctl', ['kickstart', '-k', `${domain}/${LABEL}`]);
     return { platform: 'launchd', label: LABEL, file, launcher, entry: RUN_ENTRY, root };

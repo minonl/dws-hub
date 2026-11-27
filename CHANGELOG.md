@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here.
 
+## [0.1.11] — 2026-11-27
+
+### Fixed
+
+- `service install` waits for the old job to actually unload and retries `launchctl bootstrap`.
+  `bootout` is asynchronous: bootstrapping too early intermittently failed with launchd EIO,
+  leaving the service **not loaded** after an otherwise successful install.
+
 ## [0.1.10] — 2026-11-27
 
 ### Fixed
