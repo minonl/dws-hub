@@ -1,5 +1,5 @@
 /**
- * 服务安装：环境变量透传（plist / systemd 都要带上库、订阅、投递命令等）
+ * 服务安装：环境变量透传 + 稳定 launcher（不写死 bun）
  */
 import { describe, expect, test } from 'bun:test';
 import { plist, serviceEnv, systemdUnit } from './install.mjs';
@@ -13,7 +13,9 @@ const env = {
   HOME: '/Users/example',
 };
 
-describe('service install env passthrough', () => {
+const launcher = '/root/bin/dws-hub-service';
+
+describe('service install', () => {
   test('serviceEnv 只收 DWS_HUB_* 并强制 HOME/ENABLE', () => {
     const out = serviceEnv('/root', env);
     expect(out.DWS_HUB_DB).toBe('/data/hub.db');
@@ -24,18 +26,21 @@ describe('service install env passthrough', () => {
     expect(out.HOME).toBeUndefined();
   });
 
-  test('plist 含关键变量且转义', () => {
-    const p = plist({ bun: '/b/bun', entry: '/b/run.mjs', root: '/root', env });
+  test('plist 走稳定 launcher，不写死 bun', () => {
+    const p = plist({ launcher, root: '/root', env });
+    expect(p).toContain('<string>/bin/bash</string>');
+    expect(p).toContain(`<string>${launcher}</string>`);
+    expect(p).not.toMatch(/Cellar|\.bun\//);
+    expect(p).toContain('<key>X-DwsHub-Owned</key><true/>');
     expect(p).toContain('<key>DWS_HUB_DB</key><string>/data/hub.db</string>');
-    expect(p).toContain('<key>DWS_HUB_FOLLOWS</key>');
-    expect(p).toContain('DWS_HUB_INBOX_KEY');
     expect(p).not.toContain('<key>PATH</key>');
   });
 
-  test('systemd unit 含同样变量', () => {
-    const u = systemdUnit({ bun: '/b/bun', entry: '/b/run.mjs', root: '/root', env });
+  test('systemd unit 走同一条 launcher，并带归属标记', () => {
+    const u = systemdUnit({ launcher, root: '/root', env });
+    expect(u).toContain(`ExecStart=/bin/bash ${launcher}`);
+    expect(u).toContain('X-DwsHub-Owned=1');
     expect(u).toContain('Environment=DWS_HUB_DB=/data/hub.db');
-    expect(u).toContain('Environment=DWS_HUB_HOME=/root');
     expect(u).not.toContain('Environment=PATH=');
   });
 });

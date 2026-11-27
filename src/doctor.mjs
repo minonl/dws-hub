@@ -6,10 +6,14 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { dataRoot, dbPath, ENV, followsPath } from './config.mjs';
-import { RUN_ENTRY, status as serviceStatus } from './service/install.mjs';
+import { RUN_ENTRY, launcherPath, status as serviceStatus } from './service/install.mjs';
+import { lockPath } from './service/lock.mjs';
+
+const PKG = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8'));
 
 /** 读「服务单元」里的环境变量（SSOT：服务实际生效的那份，而不是当前 shell）。 */
 export function unitEnv() {
@@ -89,6 +93,10 @@ export function doctor({ env = process.env } = {}) {
   const bun = globalThis.Bun?.version;
   add('bun', Boolean(bun), bun ? `bun ${bun}` : '不在 bun 运行时下（bin 需要 bun）', '安装 bun：https://bun.sh');
 
+  // 1.5) bun（服务 runtime；launcher 会在运行时找它，但 doctor 提前给出结论）
+  const bunProbe = probe(env.DWS_HUB_BUN || 'bun', ['--version']);
+  add('bun', bunProbe.ok, bunProbe.ok ? `bun ${bunProbe.out}` : `不可执行：${bunProbe.error}`, '安装 bun 或设置 DWS_HUB_BUN');
+
   // 2) dws
   const dws = probe(env.DWS_BIN || 'dws', ['--version']);
   add('dws', dws.ok, dws.ok ? dws.out : `不可执行：${dws.error}`, '安装 dws 并确保在 PATH（注意 dws 是 Node 脚本，需要 node）');
@@ -142,6 +150,24 @@ export function doctor({ env = process.env } = {}) {
     regs.length ? regs.map((r) => r.label).join(', ') : '无',
     '停掉并卸载多余的注册（dws-hub service uninstall / 旧 dia-job 卸载）',
   );
+
+  // 7.8) launcher 与运行版本
+  const launcher = launcherPath(root);
+  add('launcher', existsSync(launcher), existsSync(launcher) ? launcher : `${launcher} 不存在（dws-hub service install）`, 'dws-hub service install');
+  let runningVersion = null;
+  try {
+    runningVersion = JSON.parse(readFileSync(join(lockPath(env), 'meta.json'), 'utf8')).version || null;
+  } catch {
+    runningVersion = null;
+  }
+  if (runningVersion) {
+    add(
+      'running-version',
+      runningVersion === PKG.version,
+      `running=${runningVersion} package=${PKG.version}`,
+      '升级后需重启服务：dws-hub service install',
+    );
+  }
 
   // 8) 服务
   const svc = serviceStatus();

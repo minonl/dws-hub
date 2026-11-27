@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here.
 
+## [0.1.9] — 2026-11-27
+
+### Changed
+
+- The supervised entry point is now a **stable launcher** (`<root>/bin/dws-hub-service`) that resolves
+  `bun` at run time (`DWS_HUB_BUN` → `PATH` → common locations). The plist/unit no longer embeds a
+  versioned Bun path, so Homebrew/fnm/nvm upgrades cannot break the service. `doctor` reports `bun`,
+  `launcher` and `running-version`.
+- Daily log files (`logs/service-YYYY-MM-DD.log`) with a 14-day retention (`DWS_HUB_LOG_KEEP_DAYS`).
+- Linux install reports whether `loginctl` linger is enabled (otherwise the service stops on logout).
+- `service uninstall` reports `possible_resurrectors` (other dws-hub registrations still present).
+
 ## [0.1.8] — 2026-11-27
 
 ### Fixed

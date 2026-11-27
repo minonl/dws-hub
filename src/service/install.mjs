@@ -1,9 +1,9 @@
 /**
  * 服务安装 / 卸载 / 状态（macOS=launchd，Linux=systemd --user）
  *
- * 与旧实现的关键差别：**不依赖任何外部框架解析「哪份代码生效」**——
- * plist / unit 里直接写本包内 `service/run.mjs` 的绝对路径（安装时解析）。
- * 升级包后若路径变了，`dws-hub doctor` 会报「注册路径与当前安装不一致」并给重装命令。
+ * 与旧实现的关键差别：**不依赖任何外部框架解析「哪份代码生效」**。
+ * 注册入口是一个稳定 launcher（`<root>/bin/dws-hub-service`），**在运行时探测 bun**，
+ * 所以 bun 升级/换路径（Homebrew Cellar、fnm、nvm）不会让服务失效；plist 里不写死 bun。
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -45,12 +45,36 @@ export function serviceEnv(root, env = process.env) {
 }
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const RUN_ENTRY = join(HERE, 'run.mjs');
+export const launcherPath = (root) => join(root, 'bin', 'dws-hub-service');
+
+/** 生成稳定 launcher：运行时找 bun（PATH → 常见位置），找不到就大声失败。 */
+export function writeLauncher(root, env = process.env) {
+  const file = launcherPath(root);
+  mkdirSync(dirname(file), { recursive: true });
+  const script = `#!/bin/bash
+# 稳定入口（勿手改）：由 dws-hub service install 生成。
+# 为什么不写死 bun：Homebrew 升级会删旧 Cellar 版本目录；fnm/nvm 也会换路径。
+set -u
+export PATH="\${DWS_HUB_PATH_PREFIX:-/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$HOME/.local/share/fnm/aliases/default/bin}:$PATH"
+BUN="\${DWS_HUB_BUN:-}"
+if [ -z "$BUN" ]; then BUN="$(command -v bun 2>/dev/null || true)"; fi
+if [ -z "$BUN" ]; then
+  for c in "$HOME/.bun/bin/bun" /opt/homebrew/bin/bun /usr/local/bin/bun; do
+    [ -x "$c" ] && BUN="$c" && break
+  done
+fi
+[ -n "$BUN" ] || { echo "[dws-hub] ✗ 找不到 bun（设置 DWS_HUB_BUN 或把 bun 加入 PATH）" >&2; exit 3; }
+exec "$BUN" ${JSON.stringify(join(HERE, 'run.mjs'))}
+`;
+  writeFileSync(file, script, { mode: 0o755 });
+  return file;
+}
 
 const isMac = platform() === 'darwin';
 const launchAgentPath = () => join(homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`);
 const systemdUnitPath = () => join(homedir(), '.config', 'systemd', 'user', 'dws-hub.service');
 
-export function plist({ bun, entry, root, env = process.env }) {
+export function plist({ launcher, root, env = process.env }) {
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const vars = serviceEnv(root, env);
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -61,8 +85,8 @@ export function plist({ bun, entry, root, env = process.env }) {
   <key>X-DwsHub-Owned</key><true/>
   <key>ProgramArguments</key>
   <array>
-    <string>${esc(bun)}</string>
-    <string>${esc(entry)}</string>
+    <string>/bin/bash</string>
+    <string>${esc(launcher)}</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
@@ -73,14 +97,14 @@ ${Object.entries({ DWS_HUB_INTERVAL: '60', DWS_HUB_STREAM_SEC: '1500', ...vars }
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>30</integer>
-  <key>StandardOutPath</key><string>${esc(join(root, 'logs', 'service.log'))}</string>
-  <key>StandardErrorPath</key><string>${esc(join(root, 'logs', 'service.log'))}</string>
+  <key>StandardOutPath</key><string>${esc(join(root, 'logs', 'launcher.log'))}</string>
+  <key>StandardErrorPath</key><string>${esc(join(root, 'logs', 'launcher.log'))}</string>
 </dict>
 </plist>
 `;
 }
 
-export function systemdUnit({ bun, entry, root, env = process.env }) {
+export function systemdUnit({ launcher, root, env = process.env }) {
   return `[Unit]
 Description=dws-hub (DingTalk workspace CLI capability layer)
 After=network-online.target
@@ -88,7 +112,7 @@ After=network-online.target
 [Service]
 X-DwsHub-Owned=1
 Type=simple
-ExecStart=${bun} ${entry}
+ExecStart=/bin/bash ${launcher}
 ${Object.entries({ DWS_HUB_INTERVAL: '60', DWS_HUB_STREAM_SEC: '1500', ...serviceEnv(root, env) })
   .map(([k, v]) => `Environment=${k}=${v}`)
   .join('\n')}
@@ -129,7 +153,8 @@ export function resolveBun(env = process.env) {
 export function install() {
   const root = dataRoot();
   mkdirSync(join(root, 'logs'), { recursive: true });
-  const args = { bun: resolveBun(process.env), entry: RUN_ENTRY, root, env: process.env };
+  const launcher = writeLauncher(root, process.env);
+  const args = { launcher, root, env: process.env };
 
   if (isMac) {
     const file = launchAgentPath();
@@ -144,7 +169,7 @@ export function install() {
     sh('launchctl', ['bootstrap', domain, file]);
     sh('launchctl', ['enable', `${domain}/${LABEL}`]);
     sh('launchctl', ['kickstart', '-k', `${domain}/${LABEL}`]);
-    return { platform: 'launchd', label: LABEL, file, entry: RUN_ENTRY, root };
+    return { platform: 'launchd', label: LABEL, file, launcher, entry: RUN_ENTRY, root };
   }
 
   const file = systemdUnitPath();
@@ -152,7 +177,55 @@ export function install() {
   writeFileSync(file, systemdUnit(args));
   sh('systemctl', ['--user', 'daemon-reload']);
   sh('systemctl', ['--user', 'enable', '--now', 'dws-hub.service']);
-  return { platform: 'systemd', label: 'dws-hub.service', file, entry: RUN_ENTRY, root };
+
+  // 登出后 systemd --user 会停：必须开 linger（否则「看起来装好了，一登出就没了」）
+  let linger = 'unknown';
+  try {
+    linger = sh('loginctl', ['show-user', process.env.USER || '', '-p', 'Linger']).trim();
+  } catch {
+    /* loginctl 不可用 */
+  }
+  const lingerOk = /Linger=yes/.test(linger);
+  return {
+    platform: 'systemd',
+    label: 'dws-hub.service',
+    file,
+    launcher,
+    entry: RUN_ENTRY,
+    root,
+    linger: lingerOk ? 'yes' : 'no',
+    ...(lingerOk ? {} : { warning: '未开启 linger：登出后会停服。执行 loginctl enable-linger $USER' }),
+  };
+}
+
+/** 还有哪些注册看起来也在跑 dws-hub（卸载后提示用） */
+export function findOtherRegistrations() {
+  const out = [];
+  if (isMac) {
+    try {
+      const list = execFileSync('launchctl', ['list'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      for (const line of list.split('\n')) {
+        const label = (line.split('\t')[2] || '').trim();
+        if (!label || label === LABEL) continue;
+        if (/dws[-_]hub/i.test(label)) out.push(label);
+      }
+    } catch {
+      /* ignore */
+    }
+    return out;
+  }
+  try {
+    const files = execFileSync('systemctl', ['--user', 'list-unit-files', '*dws-hub*', '--no-legend'], {
+      encoding: 'utf8',
+    });
+    for (const line of files.split('\n').filter(Boolean)) {
+      const name = line.split(/\s+/)[0];
+      if (name && name !== 'dws-hub.service') out.push(name);
+    }
+  } catch {
+    /* ignore */
+  }
+  return out;
 }
 
 export function uninstall() {
@@ -164,7 +237,13 @@ export function uninstall() {
     }
     const existed = existsSync(launchAgentPath());
     rmSync(launchAgentPath(), { force: true });
-    return { platform: 'launchd', removed: existed, already_absent: !existed };
+    const resurrectors = findOtherRegistrations();
+    return {
+      platform: 'launchd',
+      removed: existed,
+      already_absent: !existed,
+      ...(resurrectors.length ? { possible_resurrectors: resurrectors } : {}),
+    };
   }
   try {
     sh('systemctl', ['--user', 'disable', '--now', 'dws-hub.service']);
@@ -178,7 +257,13 @@ export function uninstall() {
   } catch {
     /* ignore */
   }
-  return { platform: 'systemd', removed: existed, already_absent: !existed };
+  const resurrectors = findOtherRegistrations();
+  return {
+    platform: 'systemd',
+    removed: existed,
+    already_absent: !existed,
+    ...(resurrectors.length ? { possible_resurrectors: resurrectors } : {}),
+  };
 }
 
 export function status() {

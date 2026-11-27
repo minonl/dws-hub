@@ -107,3 +107,25 @@ organization's groups, people, ticket system or internal host, it belongs in the
 consumers are external commands, so that is easy.
 
 `bun run check:generic` enforces this (built-in structural rules + external denylist, see README).
+
+## 8. Runtime dependency (and why not Go/Rust yet)
+
+The package runs on **Bun** (`bun:sqlite`). That is the only non-Node runtime dependency, and it is a
+deliberate trade-off: the service, CLI and tests share one runtime, with no build step.
+
+To keep a Bun upgrade from breaking a supervised install:
+
+- the launchd plist / systemd unit starts a **stable launcher** (`<root>/bin/dws-hub-service`),
+  not a versioned Bun path;
+- the launcher resolves `bun` at run time (`DWS_HUB_BUN` → `PATH` → common install locations) and
+  fails loudly if it cannot find one;
+- `dws-hub doctor` reports `bun`, `launcher` and `running-version`.
+
+**When a compiled binary would be worth it** (Go/Rust): if we need any of
+
+1. install with **no runtime** (`brew install` / single-file download),
+2. a single static binary for Windows or musl distros,
+3. memory/startup budget that Bun cannot meet.
+
+Until then a rewrite would double the codebase and lose the shared sqlite/JS tooling; the launcher
+already removes the practical failure mode (Bun path drift).

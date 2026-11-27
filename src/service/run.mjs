@@ -4,12 +4,13 @@
  *
  * 设计要点：
  * - **有界长连接 + 循环**：`listen` 每次有界（默认 1500s），到期重连；常驻由服务管理器 KeepAlive 保证。
- *   不用「无限期监听」，避免不可控的野生进程。
- * - **单实例**：`mkdir` 原子锁（`<root>/run/dws-hub.lock`），双实例会互相抢订阅。
+ * - **单实例**：跨数据根固定锁（见 service/lock.mjs），双实例会互相抢订阅。
  * - **启动自检**：`dws` 不可执行就大声退出，绝不静默当成「0 条消息」（历史事故）。
+ * - **日志轮转**：按天写 `logs/service-YYYY-MM-DD.log`，启动时清理 14 天前的文件。
+ * - **版本可见**：包版本写进锁的 meta，`dws-hub doctor` 据此判断「跑的是不是刚装的版本」。
  */
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,19 +20,45 @@ import { acquireLock } from './lock.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI = join(HERE, '..', 'cli.mjs');
+const PKG = JSON.parse(readFileSync(join(HERE, '..', '..', 'package.json'), 'utf8'));
 
 const root = dataRoot();
 const logs = join(root, 'logs');
 mkdirSync(logs, { recursive: true });
 
+// ── 按天日志 + 保留 14 天 ───────────────────────────────────────────────────
+const LOG_KEEP_DAYS = Math.max(1, Number(process.env.DWS_HUB_LOG_KEEP_DAYS) || 14);
+const day = new Date().toISOString().slice(0, 10);
+const logFile = join(logs, `service-${day}.log`);
+const logFd = openSync(logFile, 'a');
+try {
+  const cutoff = Date.now() - LOG_KEEP_DAYS * 86400e3;
+  for (const f of readdirSync(logs)) {
+    const m = /^service-(\d{4}-\d{2}-\d{2})\.log$/.exec(f);
+    if (!m) continue;
+    const t = Date.parse(`${m[1]}T00:00:00Z`);
+    if (Number.isFinite(t) && t < cutoff) rmSync(join(logs, f), { force: true });
+  }
+} catch {
+  /* 清理失败不影响启动 */
+}
+
+function write(s) {
+  try {
+    writeSync(logFd, s);
+  } catch {
+    /* 日志写失败不阻塞服务 */
+  }
+  process.stdout.write(s);
+}
 function log(msg) {
-  console.log(`[dws-hub] ${new Date().toISOString()} ${msg}`);
+  write(`[dws-hub] ${new Date().toISOString()} ${msg}\n`);
 }
 
 // ── 单实例锁（跨数据根，唯一路径见 service/lock.mjs）────────────────────────
 let lock;
 try {
-  lock = acquireLock({ role: 'service' });
+  lock = acquireLock({ role: 'service', version: PKG.version });
 } catch (e) {
   if (e?.code === 'E_LOCKED') {
     log(`✗ ${e.message}`);
@@ -40,22 +67,28 @@ try {
   throw e;
 }
 if (lock.reclaimed) log('接管陈旧锁（上一个实例的 pid 已不在）');
-log(`锁：${lock.path}`);
+log(`启动 service v${PKG.version} · 锁 ${lock.path} · 日志 ${logFile}`);
 
 function cleanup() {
-  try { lock.release(); } catch { /* noop */ }
+  try {
+    lock.release();
+  } catch {
+    /* noop */
+  }
 }
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
-  process.on(sig, () => { log(`收到 ${sig}，退出`); cleanup(); process.exit(0); });
+  process.on(sig, () => {
+    log(`收到 ${sig}，退出`);
+    cleanup();
+    process.exit(0);
+  });
 }
 
 // ── dws 自检 ────────────────────────────────────────────────────────────────
 // launchd / systemd 的 PATH 极简（/usr/bin:/bin），既找不到 dws，也找不到 dws 需要的 node。
-// 先按「显式 → 登录 shell 解析 → 常见安装位置」找绝对路径，再把它的目录塞进 PATH。
 function resolveDws() {
   const cands = [process.env.DWS_BIN];
-  // 非登录 shell 继承的是当前 PATH：手动跑时有效；服务里 PATH 极简时会失败，继续走候选
   try {
     const viaShell = execFileSync('/bin/sh', ['-c', 'command -v dws'], { encoding: 'utf8', timeout: 5000 })
       .trim()
@@ -64,28 +97,20 @@ function resolveDws() {
   } catch {
     /* ignore */
   }
-  // 常见 Node 版本管理器路径（dws 是 Node 脚本，装在 node 的 bin 下）
-  const globs = [
+  cands.push(
     join(homedir(), '.local/share/fnm/aliases/default/bin/dws'),
     join(homedir(), '.local/bin/dws'),
     '/opt/homebrew/bin/dws',
     '/usr/local/bin/dws',
-  ];
+  );
   for (const dir of [join(homedir(), '.local/state/fnm_multishells'), join(homedir(), '.nvm/versions/node')]) {
     try {
-      const entries = readdirSync(dir);
-      for (const e of entries) {
-        globs.push(
-          dir.includes('fnm_multishells') ? join(dir, e, 'bin/dws') : join(dir, e, 'bin/dws'),
-        );
-      }
+      for (const e of readdirSync(dir)) cands.push(join(dir, e, 'bin/dws'));
     } catch {
       /* 目录不存在 */
     }
   }
-  cands.push(...globs);
   for (const c of cands.filter(Boolean)) {
-    // dws 是 Node 脚本：node 可能和它在同一个 bin 目录，测试时先把该目录塞进 PATH
     const dir = dirname(c);
     try {
       execFileSync(c, ['--version'], {
@@ -118,10 +143,19 @@ function run() {
     '--interval', process.env.DWS_HUB_INTERVAL || '60',
     '--stream-sec', process.env.DWS_HUB_STREAM_SEC || '1500',
   ];
-  log(`启动监听：bun ${args.join(' ')}（数据根 ${root}）`);
+  log(`启动监听（数据根 ${root}）`);
   const child = spawn(process.execPath, args, {
-    stdio: 'inherit',
-    env: { ...process.env, DWS_HUB_SKIP_LOCK: '1' },   // 锁由 service 持有，listen 子进程不再抢
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, DWS_HUB_SKIP_LOCK: '1' }, // 锁由 service 持有，listen 子进程不再抢
+  });
+  child.stdout.on('data', (d) => write(d.toString()));
+  child.stderr.on('data', (d) => {
+    try {
+      writeSync(logFd, d);
+    } catch {
+      /* noop */
+    }
+    process.stderr.write(d);
   });
   child.on('close', (code) => {
     log(`listen 退出 code=${code}`);
