@@ -6,7 +6,7 @@
  * 所以 bun 升级/换路径（Homebrew Cellar、fnm、nvm）不会让服务失效；plist 里不写死 bun。
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, platform } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -150,11 +150,33 @@ export function resolveBun(env = process.env) {
   return process.execPath;
 }
 
+/** 读现有服务单元里的 EnvironmentVariables（重装时作为默认值，避免少传一个变量就丢配置）。 */
+export function readUnitEnv() {
+  try {
+    if (isMac) {
+      const j = JSON.parse(
+        execFileSync('plutil', ['-convert', 'json', '-o', '-', launchAgentPath()], { encoding: 'utf8' }),
+      );
+      return j.EnvironmentVariables || {};
+    }
+    const env = {};
+    for (const line of readFileSync(systemdUnitPath(), 'utf8').split('\n')) {
+      const m = /^Environment=([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line.trim());
+      if (m) env[m[1]] = m[2];
+    }
+    return env;
+  } catch {
+    return {};
+  }
+}
+
 export function install() {
   const root = dataRoot();
   mkdirSync(join(root, 'logs'), { recursive: true });
   const launcher = writeLauncher(root, process.env);
-  const args = { launcher, root, env: process.env };
+  // 已有单元 env 作为默认值：这次 shell 没传的变量保持原值
+  const mergedEnv = { ...readUnitEnv(), ...process.env };
+  const args = { launcher, root, env: mergedEnv };
 
   if (isMac) {
     const file = launchAgentPath();
@@ -174,7 +196,7 @@ export function install() {
 
   const file = systemdUnitPath();
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, systemdUnit(args));
+  writeFileSync(file, systemdUnit({ ...args, env: mergedEnv }));
   sh('systemctl', ['--user', 'daemon-reload']);
   sh('systemctl', ['--user', 'enable', '--now', 'dws-hub.service']);
 

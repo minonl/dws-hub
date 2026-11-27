@@ -89,13 +89,15 @@ export function doctor({ env = process.env } = {}) {
   const eff = unitEarly ? { ...env, ...unitEarly.env } : env;
   const add = (id, ok, detail, fix) => checks.push({ id, ok, detail, ...(ok ? {} : { fix }) });
 
-  // 1) bun
+  // 1) bun：运行时 + PATH 里可解析（服务由 launcher 在运行时找 bun）
   const bun = globalThis.Bun?.version;
-  add('bun', Boolean(bun), bun ? `bun ${bun}` : '不在 bun 运行时下（bin 需要 bun）', '安装 bun：https://bun.sh');
-
-  // 1.5) bun（服务 runtime；launcher 会在运行时找它，但 doctor 提前给出结论）
   const bunProbe = probe(env.DWS_HUB_BUN || 'bun', ['--version']);
-  add('bun', bunProbe.ok, bunProbe.ok ? `bun ${bunProbe.out}` : `不可执行：${bunProbe.error}`, '安装 bun 或设置 DWS_HUB_BUN');
+  add(
+    'bun',
+    Boolean(bun) && bunProbe.ok,
+    `${bun ? `runtime ${bun}` : 'runtime 缺失'} · ${bunProbe.ok ? bunProbe.out : 'PATH 中不可执行'}`,
+    '安装 bun（或在服务环境里设置 DWS_HUB_BUN）',
+  );
 
   // 2) dws
   const dws = probe(env.DWS_BIN || 'dws', ['--version']);

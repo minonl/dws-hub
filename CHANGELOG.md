@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here.
 
+## [0.1.10] — 2026-11-27
+
+### Fixed
+
+- `service install` merges the **existing unit environment** as defaults, so re-running it from a
+  shell that only exports some variables no longer drops the rest (inbox command, self identity).
+- `doctor` reports one `bun` check (runtime + PATH resolution) instead of duplicating it.
+
 ## [0.1.9] — 2026-11-27
 
 ### Changed
